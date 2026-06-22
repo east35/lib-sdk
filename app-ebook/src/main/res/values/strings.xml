@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ebook-library</string>
+    <string name="setup_name">ebook-library Setup</string>
+</resources>
