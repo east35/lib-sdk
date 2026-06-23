@@ -15,9 +15,19 @@ android {
         versionName = "0.1.0"
     }
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     buildTypes {
-        getByName("debug") { isMinifyEnabled = false }
-        getByName("release") { isMinifyEnabled = false }
+        getByName("debug") {
+            isMinifyEnabled = false
+            buildConfigField("String", "DEFAULT_CLOUD_URL", "\"https://books.razerblade.dev\"")
+        }
+        getByName("release") {
+            isMinifyEnabled = false
+            buildConfigField("String", "DEFAULT_CLOUD_URL", "\"\"")
+        }
     }
 
     compileOptions {

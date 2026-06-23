@@ -1,0 +1,99 @@
+package com.readershell.manga
+
+import android.app.Application
+import android.content.Context
+import android.content.SharedPreferences
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.util.Log
+import com.readershell.core.Auth
+import com.readershell.core.CloudClient
+import com.readershell.core.LocalIndex
+import com.readershell.core.ProgressQueue
+import com.readershell.core.ProxyServer
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+
+class MangaApp : Application() {
+
+    lateinit var prefs: SharedPreferences
+    lateinit var auth: Auth
+    lateinit var queue: ProgressQueue
+
+    var config: MangaConfig? = null
+        private set
+    var cloud: CloudClient? = null
+        private set
+    var index: LocalIndex? = null
+        private set
+    var proxy: ProxyServer? = null
+        private set
+    var router: MangaRouter? = null
+        private set
+
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    override fun onCreate() {
+        super.onCreate()
+        prefs = getSharedPreferences("manga_shell", Context.MODE_PRIVATE)
+        auth = Auth(this, namespace = "manga")
+        queue = ProgressQueue(this, namespace = "manga")
+        if (isConfigured()) reload()
+        registerConnectivityFlush()
+    }
+
+    private fun registerConnectivityFlush() {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val req = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            .build()
+        cm.registerNetworkCallback(req, object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                ioScope.launch {
+                    val r = router ?: return@launch
+                    val n = r.flushDirty()
+                    if (n > 0) Log.i(TAG, "auto-flushed $n dirty progress row(s) on connectivity")
+                }
+            }
+        })
+    }
+
+    fun isConfigured(): Boolean {
+        val url = prefs.getString(KEY_CLOUD_URL, null) ?: return false
+        if (!url.startsWith("http")) return false
+        if (auth.password.isNullOrEmpty()) return false
+        if (prefs.getString(KEY_LOCAL_ROOT, null).isNullOrEmpty()) return false
+        return true
+    }
+
+    fun reload() {
+        proxy?.stop()
+
+        val url = prefs.getString(KEY_CLOUD_URL, null)
+            ?: error("reload() called without a cloud URL set")
+        val cfg = MangaConfig(url)
+        val c = CloudClient(cfg, auth)
+        val idx = LocalIndex(cfg).apply {
+            prefs.getString(KEY_LOCAL_ROOT, null)?.takeIf { it.isNotEmpty() }?.let { setRoot(it) }
+        }
+        val r = MangaRouter(this, c, idx, queue, cfg.cloudBaseUrl)
+        val p = ProxyServer(this, cfg, c, assets, r).also { it.start() }
+
+        config = cfg
+        cloud = c
+        index = idx
+        router = r
+        proxy = p
+    }
+
+    companion object {
+        const val KEY_CLOUD_URL = "cloud_url"
+        const val KEY_LOCAL_ROOT = "local_root"
+        private const val TAG = "MangaShellApp"
+    }
+}

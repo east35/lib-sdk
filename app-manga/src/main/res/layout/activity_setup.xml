@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="24dp">
+
+    <LinearLayout
+        android:orientation="vertical"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Manga Reader setup"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:paddingBottom="16dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Cloud URL"
+            android:paddingTop="8dp" />
+        <EditText
+            android:id="@+id/cloud_url"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="https://manga.example.com"
+            android:inputType="textUri"
+            android:importantForAutofill="no" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Password"
+            android:paddingTop="16dp" />
+        <EditText
+            android:id="@+id/password"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="textPassword"
+            android:importantForAutofill="no" />
+
+        <Button
+            android:id="@+id/grant_file_access"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Grant file access (required)"
+            android:visibility="gone" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Syncthing manga folder"
+            android:paddingTop="16dp" />
+        <TextView
+            android:id="@+id/local_root_path"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="(not set)"
+            android:textStyle="italic"
+            android:paddingTop="4dp"
+            android:paddingBottom="8dp" />
+        <Button
+            android:id="@+id/pick_folder"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Choose folder…" />
+
+        <Button
+            android:id="@+id/save"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="Save and launch" />
+
+        <TextView
+            android:id="@+id/status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="16dp"
+            android:textSize="12sp" />
+    </LinearLayout>
+</ScrollView>

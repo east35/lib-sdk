@@ -1,4 +1,4 @@
-package com.readershell.ebook
+package com.readershell.manga
 
 import android.content.Intent
 import android.net.Uri
@@ -23,16 +23,10 @@ class SetupActivity : AppCompatActivity() {
     private lateinit var grantFileAccess: Button
     private lateinit var status: TextView
 
-    /**
-     * SAF folder picker. Returns a tree URI; we convert it to a filesystem path
-     * so LocalIndex (java.io.File-based) can read it directly.
-     */
     private val pickFolder = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri: Uri? ->
         if (uri == null) return@registerForActivityResult
-        // Persist the permission grant so we can re-read later if we ever
-        // switch to true SAF reads.
         try {
             contentResolver.takePersistableUriPermission(
                 uri,
@@ -54,7 +48,7 @@ class SetupActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_setup)
 
-        val app = application as EbookApp
+        val app = application as MangaApp
         val cloudUrl = findViewById<EditText>(R.id.cloud_url)
         val password = findViewById<EditText>(R.id.password)
         localRootPath = findViewById(R.id.local_root_path)
@@ -62,9 +56,9 @@ class SetupActivity : AppCompatActivity() {
         grantFileAccess = findViewById(R.id.grant_file_access)
         grantFileAccess.setOnClickListener { openAllFilesAccessSettings() }
 
-        cloudUrl.setText(app.prefs.getString(EbookApp.KEY_CLOUD_URL, "")?.ifEmpty { BuildConfig.DEFAULT_CLOUD_URL } ?: BuildConfig.DEFAULT_CLOUD_URL)
-        password.setText(app.auth.password ?: "")
-        app.prefs.getString(EbookApp.KEY_LOCAL_ROOT, null)?.let {
+        cloudUrl.setText(app.prefs.getString(MangaApp.KEY_CLOUD_URL, "")?.ifEmpty { BuildConfig.DEFAULT_CLOUD_URL } ?: BuildConfig.DEFAULT_CLOUD_URL)
+        password.setText(app.auth.password?.ifEmpty { BuildConfig.DEFAULT_PASSWORD } ?: BuildConfig.DEFAULT_PASSWORD)
+        app.prefs.getString(MangaApp.KEY_LOCAL_ROOT, null)?.let {
             pickedPath = it
             localRootPath.text = it
         }
@@ -97,8 +91,8 @@ class SetupActivity : AppCompatActivity() {
             }
 
             app.prefs.edit()
-                .putString(EbookApp.KEY_CLOUD_URL, url)
-                .putString(EbookApp.KEY_LOCAL_ROOT, root)
+                .putString(MangaApp.KEY_CLOUD_URL, url)
+                .putString(MangaApp.KEY_LOCAL_ROOT, root)
                 .apply()
             app.auth.password = pwd
             app.reload()
@@ -125,8 +119,6 @@ class SetupActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Environment.isExternalStorageManager()
         } else {
-            // On API < 30 there's no "all files access" concept; storage perm
-            // is granted at install time via the manifest entry.
             true
         }
 
@@ -142,12 +134,6 @@ class SetupActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * Convert a SAF tree URI (content://com.android.externalstorage.documents/tree/primary%3ABooks)
-     * into a real filesystem path. Works for the primary external volume that
-     * the Boox library lives on. Non-primary volumes (SD/USB) return a
-     * best-effort path that may not be readable.
-     */
     private fun treeUriToFsPath(uri: Uri): String? {
         val docId = try { DocumentsContract.getTreeDocumentId(uri) } catch (_: Exception) { return null }
         val parts = docId.split(":", limit = 2)
@@ -159,5 +145,5 @@ class SetupActivity : AppCompatActivity() {
         }
     }
 
-    companion object { private const val TAG = "ReaderShellSetup" }
+    companion object { private const val TAG = "MangaShellSetup" }
 }
