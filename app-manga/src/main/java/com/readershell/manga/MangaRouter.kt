@@ -1,6 +1,8 @@
 package com.readershell.manga
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.util.Log
 import com.readershell.core.CloudClient
 import com.readershell.core.LocalIndex
@@ -12,8 +14,12 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.zip.ZipFile
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
 class MangaRouter(
     private val ctx: Context,
@@ -37,7 +43,7 @@ class MangaRouter(
             uri.startsWith("/api/series/") && uri.endsWith("/pages") && session.method == NanoHTTPD.Method.GET ->
                 handlePages(uri)
             uri.startsWith("/api/series/") && uri.contains("/page/") && session.method == NanoHTTPD.Method.GET ->
-                handlePage(uri)
+                handlePage(uri, session)
             uri == "/api/progress" && session.method == NanoHTTPD.Method.GET ->
                 handleProgressGet()
             uri == "/api/progress" && session.method == NanoHTTPD.Method.POST ->
@@ -100,7 +106,7 @@ class MangaRouter(
         return json(JSONObject().put("pages", pages).toString())
     }
 
-    private fun handlePage(uri: String): NanoHTTPD.Response? {
+    private fun handlePage(uri: String, session: NanoHTTPD.IHTTPSession): NanoHTTPD.Response? {
         val prefix = "/api/series/"
         val chapterMarker = "/chapters/"
         val pageMarker = "/page/"
@@ -118,16 +124,84 @@ class MangaRouter(
             "application/json",
             """{"ok":false,"error":"page not found"}""",
         )
+        val crop = session.parameters["crop"]?.firstOrNull() == "1"
         ZipFile(file).use { zip ->
             val entry = zip.getEntry(name) ?: return null
-            val bytes = zip.getInputStream(entry).use { it.readBytes() }
+            val raw = zip.getInputStream(entry).use { it.readBytes() }
+            val (bytes, mime) = if (crop) {
+                autocropPage(raw) ?: (raw to imageMime(name))
+            } else raw to imageMime(name)
             return NanoHTTPD.newFixedLengthResponse(
                 NanoHTTPD.Response.Status.OK,
-                imageMime(name),
+                mime,
                 ByteArrayInputStream(bytes),
                 bytes.size.toLong(),
             )
         }
+    }
+
+    // Kotlin port of manga-library/app.py:autocrop_page. Trims near-uniform
+    // margins by projecting content pixels onto rows/cols of a downscaled copy,
+    // then crops the original. Returns null when the page is blank or already
+    // trimmed, so the caller serves the untouched bytes.
+    private fun autocropPage(data: ByteArray): Pair<ByteArray, String>? {
+        val src = BitmapFactory.decodeByteArray(data, 0, data.size) ?: return null
+        val w = src.width
+        val h = src.height
+        if (w < 8 || h < 8) return null
+        val analyze = 500
+        val maxSide = max(w, h)
+        val scale = if (maxSide > analyze) maxSide.toDouble() / analyze else 1.0
+        val sw = max(1, (w / scale).toInt())
+        val sh = max(1, (h / scale).toInt())
+        val small = Bitmap.createScaledBitmap(src, sw, sh, true)
+        val pixels = IntArray(sw * sh)
+        small.getPixels(pixels, 0, sw, 0, 0, sw, sh)
+        if (small !== src) small.recycle()
+
+        fun luma(p: Int): Int {
+            val r = (p shr 16) and 0xff
+            val g = (p shr 8) and 0xff
+            val b = p and 0xff
+            return (299 * r + 587 * g + 114 * b) / 1000
+        }
+
+        val bg = (luma(pixels[0]) + luma(pixels[sw - 1]) +
+                luma(pixels[(sh - 1) * sw]) + luma(pixels[sh * sw - 1])) / 4.0
+        val thresh = 255.0 * 0.12
+        val rowHit = IntArray(sh)
+        val colHit = IntArray(sw)
+        for (y in 0 until sh) {
+            val off = y * sw
+            for (x in 0 until sw) {
+                if (abs(luma(pixels[off + x]) - bg) > thresh) {
+                    rowHit[y]++
+                    colHit[x]++
+                }
+            }
+        }
+        val rowMin = sw * 0.012
+        val colMin = sh * 0.012
+        var firstRow = -1; var lastRow = -1
+        for (y in 0 until sh) if (rowHit[y] > rowMin) { if (firstRow < 0) firstRow = y; lastRow = y }
+        var firstCol = -1; var lastCol = -1
+        for (x in 0 until sw) if (colHit[x] > colMin) { if (firstCol < 0) firstCol = x; lastCol = x }
+        if (firstRow < 0 || firstCol < 0) return null
+
+        val padX = (w * 0.01).toInt()
+        val padY = (h * 0.01).toInt()
+        val left = max(0, (firstCol * scale).toInt() - padX)
+        val top = max(0, (firstRow * scale).toInt() - padY)
+        val right = min(w, ((lastCol + 1) * scale).toInt() + padX)
+        val bottom = min(h, ((lastRow + 1) * scale).toInt() + padY)
+        if (left < w * 0.03 && top < h * 0.03 && right > w * 0.97 && bottom > h * 0.97) return null
+
+        val cropped = Bitmap.createBitmap(src, left, top, right - left, bottom - top)
+        val out = ByteArrayOutputStream()
+        cropped.compress(Bitmap.CompressFormat.JPEG, 88, out)
+        if (cropped !== src) cropped.recycle()
+        src.recycle()
+        return out.toByteArray() to "image/jpeg"
     }
 
     private fun parseChapterUri(uri: String): ChapterRef? {
