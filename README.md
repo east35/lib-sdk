@@ -14,7 +14,7 @@ offline. Backends are unchanged: the shells just sit in front of them.
 |------------|---------|----------------------------------------------------------|
 | `core/`    | shared  | embedded HTTP proxy, local index, progress queue, auth   |
 | `honlib/`  | HonLib  | <https://github.com/east35/HonLib> (ebooks, `.epub`)     |
-| `galib/`   | GaLib   | manga-dl (manga, `.cbz`)                                 |
+| `galib/`   | GaLib   | galib (manga, `.cbz`)                                 |
 
 The two app modules are thin shells — config + bundled web assets — sharing
 `core/`.
@@ -35,12 +35,6 @@ Build and install to a connected device:
 
 The HonLib build path is set in `honlib/build.gradle.kts`; the manga path in
 `galib/build.gradle.kts`. Adjust if your sibling layout differs.
-
-## Architecture
-
-See [`spec.md`](./spec.md) for the full design — localhost proxy rationale,
-content-id ↔ local-file mapping, routing tables, offline progress queue, and
-the phase plan.
 
 ## Settings UI
 
