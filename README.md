@@ -21,15 +21,10 @@ The two app modules are thin shells — config + bundled web assets — sharing
 
 ## Build
 
-Requires Android SDK at `~/Library/Android/sdk` (set via `local.properties`)
-and the sibling web-app repos checked out alongside `lib-sdk/`:
-
-```
-01.Personal Apps/
-├── lib-sdk/         ← this repo
-├── HonLib/          ← static/, fonts/ copied into honlib APK at build time
-└── manga-library/   ← static/, fonts/ copied into galib APK at build time
-```
+Requires the Android SDK (set its location in `local.properties` as
+`sdk.dir=...`) and the two web-app repos checked out as siblings of this
+repo. At build time each app module copies `static/` and `fonts/` from its
+sibling into the APK's `assets/web/`.
 
 Build and install to a connected device:
 
