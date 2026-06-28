@@ -1,8 +1,8 @@
 package com.readershell.core
 
 /**
- * Per-app configuration the proxy needs. app-ebook and app-manga each
- * provide an implementation; core/ stays app-agnostic.
+ * Per-app configuration the proxy needs. honlib and galib each provide
+ * an implementation; core/ stays app-agnostic.
  */
 interface AppConfig {
     /** Cloud base URL, e.g. "https://ebook.example.com". No trailing slash. */

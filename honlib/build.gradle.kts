@@ -38,19 +38,20 @@ android {
 
     sourceSets {
         getByName("main") {
-            // Web UI assets are copied here at build time by :app-ebook:copyWebAssets.
+            // Web UI assets are copied here at build time by :honlib:copyWebAssets.
             assets.srcDir(layout.buildDirectory.dir("generated/webAssets"))
         }
     }
 }
 
 /**
- * Copy the ebook-library web UI into the APK's assets/web/ at build time.
- * Source: ../../ebook-library/{static,fonts}. The web UI is the universal
- * client; bundling it lets the WebView load http://127.0.0.1:PORT/ offline.
+ * Copy the HonLib web UI into the APK's assets/web/ at build time.
+ * Source: ../HonLib/{static,fonts} (sibling of lib-sdk). The web UI is the
+ * universal client; bundling it lets the WebView load http://127.0.0.1:PORT/
+ * offline. Repo: https://github.com/east35/HonLib.
  */
-val webUiSourceStatic = file("${rootDir}/../ebook-library/static")
-val webUiSourceFonts  = file("${rootDir}/../ebook-library/fonts")
+val webUiSourceStatic = file("${rootDir}/../HonLib/static")
+val webUiSourceFonts  = file("${rootDir}/../HonLib/fonts")
 
 val copyWebAssets by tasks.registering(Copy::class) {
     val dest = layout.buildDirectory.dir("generated/webAssets/web")
@@ -59,7 +60,7 @@ val copyWebAssets by tasks.registering(Copy::class) {
     from(webUiSourceFonts)  { into("fonts") }
     doFirst {
         require(webUiSourceStatic.isDirectory) {
-            "ebook-library static dir not found at $webUiSourceStatic — adjust path in app-ebook/build.gradle.kts"
+            "HonLib static dir not found at $webUiSourceStatic — adjust path in honlib/build.gradle.kts"
         }
     }
 }

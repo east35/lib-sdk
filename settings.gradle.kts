@@ -16,4 +16,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "ReaderShell"
-include(":core", ":app-ebook", ":app-manga")
+include(":core", ":honlib", ":galib")

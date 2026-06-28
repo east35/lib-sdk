@@ -16,7 +16,7 @@ import java.io.FileInputStream
 
 /**
  * Per-spec §5 ebook routing. Endpoint shapes confirmed against
- * ebook-library/app.py:
+ * HonLib app.py (https://github.com/east35/HonLib):
  *   /api/library, /api/book/<id>/file, /api/book/<id>/cover, /api/progress
  *
  * Phase-1 stub: handles local hits for /file and /cover (when reachable),

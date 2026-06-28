@@ -57,7 +57,7 @@ val copyWebAssets by tasks.registering(Copy::class) {
     }
     doFirst {
         require(webUiSourceStatic.isDirectory) {
-            "manga-library static dir not found at $webUiSourceStatic — adjust path in app-manga/build.gradle.kts"
+            "manga-library static dir not found at $webUiSourceStatic — adjust path in galib/build.gradle.kts"
         }
     }
 }

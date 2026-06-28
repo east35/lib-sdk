@@ -1,4 +1,4 @@
-# Reader Shell — local-first WebView client for manga-dl + ebook-library
+# Reader Shell — local-first WebView client for manga-dl + HonLib
 
 **Status:** design agreed 2026-06-22, no code yet. This doc is self-contained so it can be
 worked from any machine (the planning happened in a Claude session on the NAS; this spec is the
@@ -14,7 +14,7 @@ devices and are **sometimes offline**.
 
 Decomposition of the goal:
 - **Any device *with* network** is already solved: the two existing web apps (manga-dl,
-  ebook-library) are served publicly over a Cloudflare tunnel and work in any browser. Nothing to
+  HonLib) are served publicly over a Cloudflare tunnel and work in any browser. Nothing to
   build there.
 - **The only gap** is on the Android readers: (a) work with **zero network**, and (b) prefer
   **local files** when present. That gap is what this project fills.
@@ -25,7 +25,7 @@ Both are Flask apps on the Synology NAS, reached publicly via **cloudflared tunn
 (tunnel id `070b0a92-8f3f-4d46-8f6e-21752f4770de`; public hostnames are managed in the Cloudflare
 zero-trust dashboard). **No backend changes are required for this project.**
 
-| | manga-dl | ebook-library |
+| | manga-dl | HonLib (ebook) |
 |---|---|---|
 | Public URL (cloudflared) | `<FILL: manga public hostname>` | `<FILL: ebook public hostname>` |
 | LAN URL | `http://192.168.4.2:8780/` | `http://192.168.4.2:8781/` |
@@ -64,10 +64,10 @@ secure context by WebView, so fetch/modules/foliate-js work normally.)
 ### Project structure (all in git)
 - `core/` — shared Android library module: the embedded server, local index, progress queue,
   auth/cookie jar, network reachability. **No app-specific logic.**
-- `app-ebook/` — thin app module: config for ebook-library (base URL, content-id scheme = sha256
+- `honlib/` — thin app module: config for HonLib (base URL, content-id scheme = sha256
   relpath, serves whole `.epub`), bundled ebook web UI assets. **Evolve the existing shell into
   this.**
-- `app-manga/` — thin app module (net-new): config for manga-dl, content-id scheme = path-based,
+- `galib/` — thin app module (net-new): config for manga-dl, content-id scheme = path-based,
   must crack `.cbz` locally to serve page images, bundled manga web UI assets.
 
 Two separate APKs / app icons on the Boox (separate local roots, separate cloud URLs), sharing
@@ -84,12 +84,13 @@ each file's content id with the **same function the server uses**, and builds an
 **Offline-availability is presence-based, not download-state:** a library item is "available
 offline" iff its id is in the local map. Files already on the device light up automatically.
 
-### ebook (confirmed from `ebook-library/library.py`)
+### ebook (confirmed from HonLib `library.py` — https://github.com/east35/HonLib)
 ```
 book_id = sha256(library_relative_posix_path).hexdigest()[:16]
 ```
 Reproduce verbatim in Kotlin: relativize local file against local root → POSIX string →
-SHA-256 → first 16 hex chars. Exact match to server.
+SHA-256 → first 16 hex chars. Exact match to server. **Re-verify against HonLib's `library.py`
+if the id scheme ever changes upstream — this is the load-bearing contract.**
 
 ### manga (confirmed from `manga-dl/app.py`)
 - Content unit is **path-based**, no hash: the API path itself carries it —
@@ -106,7 +107,7 @@ SHA-256 → first 16 hex chars. Exact match to server.
 
 ## 5. Proxy routing tables
 
-### ebook (`app-ebook`)
+### ebook (`honlib`)
 | WebView request | Online | Offline |
 |---|---|---|
 | `/`, `*.js`, foliate-js, css | bundled assets | bundled assets |
@@ -116,7 +117,7 @@ SHA-256 → first 16 hex chars. Exact match to server.
 | `GET /api/progress` | fetch cloud, merge with local queue by newest `updated` | from local queue |
 | `POST /api/progress` | write queue **and** forward to cloud | write queue, mark dirty |
 
-### manga (`app-manga`)
+### manga (`galib`)
 Same shape, but content serving cracks the local `.cbz`:
 | WebView request | Online | Offline |
 |---|---|---|
@@ -154,17 +155,17 @@ The shell owns auth so the WebView never sees a login screen:
   only changes when the proxy/index/queue logic changes, not when the UI changes.)
 
 ## 10. Phase plan
-1. **Phase 1 — ebook shell** (evolve the existing WebView app into `app-ebook`): localhost proxy,
+1. **Phase 1 — ebook shell** (evolve the existing WebView app into `honlib`): localhost proxy,
    bundle UI assets, local index, local `.epub` serving, presence flagging, auth cookie, progress
    queue + merge. Prove the whole pattern end-to-end on the Boox.
 2. **Phase 2 — extract `core/`** from what proved out.
-3. **Phase 3 — manga shell** (`app-manga`): reuse `core/`, add the `.cbz` page-extraction serving
+3. **Phase 3 — manga shell** (`galib`): reuse `core/`, add the `.cbz` page-extraction serving
    and path-based id scheme.
 
 ## 11. Open items to resolve on the Mac
 - [ ] Fill in the two cloudflared public hostnames (from the Cloudflare dashboard).
 - [ ] Locate the existing ebook WebView shell source; decide repo (one mono-repo with
-      `core`/`app-ebook`/`app-manga`, or per-app repos). Push to git either way.
+      `core`/`honlib`/`galib`, or per-app repos). Push to git either way.
 - [ ] Bundle current web UI assets for each app into the APK (and a refresh strategy when the web
       UI changes — e.g. re-copy on build, or fetch-and-cache the asset set).
 - [ ] Confirm ebook progress timestamp field name for the merge (`progress.py` uses ISO
@@ -177,6 +178,6 @@ The shell owns auth so the WebView never sees a login screen:
   `/api/series/<n>/chapters/<c>/pages`, `/api/series/<n>/chapters/<c>/page/<idx>?crop=1`,
   `GET/POST /api/progress`, `/api/progress/read-through`. Progress shape:
   `series.<name>.chapters.<file> = {page, pages, read, updated}` + `series.<name>.current`.
-- ebook-library `app.py`: `/api/library`, `/api/book/<id>/file`, `/api/book/<id>/cover`,
+- HonLib `app.py`: `/api/library`, `/api/book/<id>/file`, `/api/book/<id>/cover`,
   `GET/POST /api/progress`. `book_id = sha256(relpath)[:16]`. Progress keyed by `book_id`
   with `cfi`/`percent`.

@@ -1,4 +1,4 @@
-package com.readershell.ebook
+package com.readershell.manga
 
 import android.annotation.SuppressLint
 import android.app.Activity
@@ -24,21 +24,24 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 
-/**
- * WebView shell. Loads the bundled UI via the embedded localhost proxy so the
- * same UI works online and offline. Page-turn hardware keys (BOOX volume
- * buttons) are forwarded to window.ebookTurnPage() — preserved from the
- * previous standalone WebView app.
- */
 class MainActivity : Activity() {
 
     private lateinit var webView: WebView
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private val longPressMs = 500L
+    private var longPressFired = false
+    private var keyDown = false
+    private val longPressRunnable = Runnable {
+        longPressFired = true
+        @Suppress("DEPRECATION") onBackPressed()
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val app = application as EbookApp
+        val app = application as MangaApp
         if (!app.isConfigured()) {
             startActivity(Intent(this, SetupActivity::class.java))
             finish()
@@ -82,6 +85,7 @@ class MainActivity : Activity() {
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 view?.evaluateJavascript(OFFLINE_AWARE_REFRESH_JS, null)
+                view?.evaluateJavascript(SHELL_SETTINGS_BUTTON_JS, null)
                 pushOnlineState(isOnline())
             }
         }
@@ -133,15 +137,6 @@ class MainActivity : Activity() {
         if (hasFocus) hideSystemBars()
     }
 
-    private fun turnPage(dir: String) {
-        webView.evaluateJavascript(
-            "window.ebookTurnPage && window.ebookTurnPage('$dir')", null,
-        )
-    }
-
-    private val mainHandler = Handler(Looper.getMainLooper())
-    private var networkCallback: ConnectivityManager.NetworkCallback? = null
-
     private fun isOnline(): Boolean {
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val n = cm.activeNetwork ?: return false
@@ -179,19 +174,7 @@ class MainActivity : Activity() {
         }
         super.onDestroy()
     }
-    private val longPressMs = 500L
-    private var longPressFired = false
-    private var keyDown = false
-    private val longPressRunnable = Runnable {
-        longPressFired = true
-        @Suppress("DEPRECATION") onBackPressed()
-    }
 
-    /**
-     * BOOX page-turn buttons arrive as volume keys.
-     *   - Quick tap → page turn (fires on UP if long-press timer didn't fire).
-     *   - Hold ≥500ms → back / close book.
-     */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val code = event.keyCode
         if (code != KeyEvent.KEYCODE_VOLUME_DOWN && code != KeyEvent.KEYCODE_VOLUME_UP) {
@@ -209,7 +192,8 @@ class MainActivity : Activity() {
                 keyDown = false
                 mainHandler.removeCallbacks(longPressRunnable)
                 if (!longPressFired) {
-                    turnPage(if (code == KeyEvent.KEYCODE_VOLUME_DOWN) "next" else "prev")
+                    val dir = if (code == KeyEvent.KEYCODE_VOLUME_DOWN) "next" else "prev"
+                    webView.evaluateJavascript("window.mangaTurnPage && window.mangaTurnPage('$dir')", null)
                 }
             }
         }
@@ -228,16 +212,6 @@ class MainActivity : Activity() {
     }
 
     companion object {
-        /**
-         * Disable the refresh button when offline so a tap can't blow up cached
-         * library state. Re-enables on reconnect. Idempotent; re-runs after each
-         * page load.
-         */
-        /**
-         * Installs window.__readerShellSetOffline(bool). The Activity drives
-         * state via ConnectivityManager — JS's navigator.onLine in WebView is
-         * unreliable and was leaving the button enabled after wifi off.
-         */
         private const val OFFLINE_AWARE_REFRESH_JS = """
             (function() {
               if (window.__readerShellSetOffline) return;
@@ -250,6 +224,36 @@ class MainActivity : Activity() {
                 btn.title = off ? 'Refresh unavailable offline' : 'Refresh library';
                 btn.style.opacity = off ? '0.4' : '';
               };
+            })();
+        """
+
+        /**
+         * Both backends ship a pre-styled #app-settings link with shell://
+         * href that's hidden for browser users. Reveal it on library view,
+         * hide while #reader is showing. Handles both styles of hiding
+         * (HTML `hidden` attribute and `.hidden` CSS class).
+         */
+        private const val SHELL_SETTINGS_BUTTON_JS = """
+            (function() {
+              if (window.__readerShellSettingsInstalled) { window.__readerShellEnsureSettings && window.__readerShellEnsureSettings(); return; }
+              window.__readerShellSettingsInstalled = true;
+              function ensure() {
+                var settings = document.getElementById('app-settings');
+                if (!settings) return;
+                var reader = document.getElementById('reader');
+                var inReader = reader && !reader.classList.contains('hidden') && !reader.hasAttribute('hidden');
+                if (inReader) {
+                  settings.setAttribute('hidden', '');
+                  settings.classList.add('hidden');
+                } else {
+                  settings.removeAttribute('hidden');
+                  settings.classList.remove('hidden');
+                }
+              }
+              window.__readerShellEnsureSettings = ensure;
+              ensure();
+              var mo = new MutationObserver(ensure);
+              mo.observe(document.documentElement, { childList: true, subtree: true });
             })();
         """
     }

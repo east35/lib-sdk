@@ -4,7 +4,8 @@ import com.readershell.core.AppConfig
 import java.security.MessageDigest
 
 /**
- * Ebook-library content scheme. Mirrors ebook-library/library.py:
+ * Ebook content scheme. Mirrors HonLib library.py
+ * (https://github.com/east35/HonLib):
  *   book_id = sha256(library_relative_posix_path).hexdigest()[:16]
  */
 class EbookConfig(override val cloudBaseUrl: String) : AppConfig {
