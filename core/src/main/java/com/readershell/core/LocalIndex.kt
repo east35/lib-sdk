@@ -60,4 +60,5 @@ class LocalIndex(private val config: AppConfig) {
     operator fun get(contentId: String): File? = map[contentId]
     fun ids(): Set<String> = map.keys
     fun size(): Int = map.size
+    fun entries(): Map<String, File> = map
 }

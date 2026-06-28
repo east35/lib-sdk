@@ -75,15 +75,59 @@ class EbookRouter(
             } else null
         } catch (_: Exception) { null }
 
-        val source = cloudJson ?: run {
-            if (libraryCacheFile.exists()) libraryCacheFile.readText()
-            else """{"books":[]}"""
-        }
+        val source = cloudJson
+            ?: if (libraryCacheFile.exists()) libraryCacheFile.readText()
+               else localLibraryJson()
         return NanoHTTPD.newFixedLengthResponse(
             NanoHTTPD.Response.Status.OK,
             "application/json; charset=utf-8",
             annotateOffline(source),
         )
+    }
+
+    /**
+     * Synthesize a library response from the local index when the cloud is
+     * unreachable and no library cache exists yet (first-run-offline). Without
+     * this, the UI shows an empty library even though books are sitting on
+     * disk. Title/group come from filename + parent dir; richer metadata
+     * arrives the first time the cloud responds.
+     */
+    private fun localLibraryJson(): String {
+        val obj = JSONObject()
+        val booksArr = JSONArray()
+        val groupsMap = linkedMapOf<String, JSONArray>()
+        val root = index.rootPath?.let { File(it) }
+        val rootUri = root?.toURI()
+        val rootAbs = root?.absolutePath
+        for ((id, file) in index.entries()) {
+            val rel = if (rootUri != null) rootUri.relativize(file.toURI()).path else file.name
+            val filename = file.name
+            val parentName = file.parentFile?.takeIf { it.absolutePath != rootAbs }?.name ?: "Library"
+            val title = filename.substringBeforeLast('.', filename)
+            val cachedCover = cachedCoverFor(id)
+            val hasCover = cachedCover != null
+            val b = JSONObject()
+                .put("id", id)
+                .put("path", rel)
+                .put("filename", filename)
+                .put("group", parentName)
+                .put("title", title)
+                .put("author", "")
+                .put("series", "")
+                .put("genre", "")
+                .put("has_cover", hasCover)
+                .put("cover_url", if (hasCover) "/api/book/$id/cover" else JSONObject.NULL)
+            booksArr.put(b)
+            groupsMap.getOrPut(parentName) { JSONArray() }.put(b)
+        }
+        obj.put("books", booksArr)
+        val groupsArr = JSONArray()
+        for ((name, arr) in groupsMap) {
+            groupsArr.put(JSONObject().put("name", name).put("books", arr))
+        }
+        obj.put("groups", groupsArr)
+        Log.i(TAG, "localLibraryJson: synthesized ${booksArr.length()} book(s) from local index")
+        return obj.toString()
     }
 
     private fun annotateOffline(json: String): String = try {
@@ -199,6 +243,13 @@ class EbookRouter(
             Log.i(TAG, "cover fetch failed for $id (offline?): ${e.message}")
             null
         }
+    }
+
+    private fun cachedCoverFor(id: String): File? {
+        val safeId = id.filter { it.isLetterOrDigit() }
+        if (safeId.isEmpty()) return null
+        val f = File(coverCacheDir, safeId)
+        return if (f.isFile && f.length() > 0) f else null
     }
 
     private fun sniffImageMime(f: File): String? {
