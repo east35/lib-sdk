@@ -92,7 +92,7 @@ class MangaRouter(
         if (!dir.isDirectory) return null
         val chapters = dir.listFiles()
             ?.filter { it.isFile && it.extension.lowercase() == "cbz" }
-            ?.sortedBy { it.name }
+            ?.sortedWith(chapterComparator)
             ?: emptyList()
         val arr = JSONArray()
         for (chapter in chapters) arr.put(JSONObject().put("file", chapter.name).put("name", chapter.name).put("offline", true))
@@ -215,6 +215,21 @@ class MangaRouter(
             MangaConfig.decodePathPart(body.substring(0, idx)),
             MangaConfig.decodePathPart(body.substring(idx + marker.length)),
         )
+    }
+
+    // Mirror of GaLib app.py:chapter_sort_key. Chapter filenames are zero-padded
+    // to 3 digits, so a plain string sort puts "Chapter 1000" between "Chapter 100"
+    // and "Chapter 101". Sort by the first number found in the stem; files without a
+    // number sort last, by lowercase name.
+    private val chapterComparator = Comparator<File> { a, b ->
+        fun key(f: File): Triple<Int, Double, String> {
+            val stem = f.name.substringBeforeLast('.')
+            val m = chapNumRe.find(stem)
+            return if (m != null) Triple(0, m.groupValues[1].toDouble(), "")
+            else Triple(1, 0.0, f.name.lowercase())
+        }
+        val ka = key(a); val kb = key(b)
+        compareValuesBy(ka, kb, { it.first }, { it.second }, { it.third })
     }
 
     private fun chapterFile(series: String, chapter: String): File? {
@@ -414,5 +429,6 @@ class MangaRouter(
     companion object {
         private const val TAG = "MangaShellRouter"
         private const val RESET_PREFIX = "__reset__/"
+        private val chapNumRe = Regex("""(\d+(?:\.\d+)?)""")
     }
 }

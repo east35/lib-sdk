@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">manga-dl</string>
-    <string name="setup_name">manga-dl Setup</string>
+    <string name="app_name">GaLib</string>
+    <string name="setup_name">GaLib Setup</string>
 </resources>

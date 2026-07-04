@@ -45,8 +45,8 @@ android {
     }
 }
 
-val webUiSourceStatic = file("${rootDir}/../manga-library/static")
-val webUiSourceFonts  = file("${rootDir}/../manga-library/fonts")
+val webUiSourceStatic = file("${rootDir}/../GaLib/static")
+val webUiSourceFonts  = file("${rootDir}/../GaLib/fonts")
 
 val copyWebAssets by tasks.registering(Copy::class) {
     val dest = layout.buildDirectory.dir("generated/webAssets/web")
@@ -57,7 +57,7 @@ val copyWebAssets by tasks.registering(Copy::class) {
     }
     doFirst {
         require(webUiSourceStatic.isDirectory) {
-            "manga-library static dir not found at $webUiSourceStatic — adjust path in galib/build.gradle.kts"
+            "GaLib static dir not found at $webUiSourceStatic — adjust path in galib/build.gradle.kts"
         }
     }
 }

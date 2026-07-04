@@ -14,7 +14,7 @@ offline. Backends are unchanged: the shells just sit in front of them.
 |------------|---------|----------------------------------------------------------|
 | `core/`    | shared  | embedded HTTP proxy, local index, progress queue, auth   |
 | `honlib/`  | HonLib  | <https://github.com/east35/HonLib> (ebooks, `.epub`)     |
-| `galib/`   | GaLib   | galib (manga, `.cbz`)                                 |
+| `galib/`   | GaLib   | GaLib (manga, `.cbz`)                                    |
 
 The two app modules are thin shells — config + bundled web assets — sharing
 `core/`.
@@ -33,7 +33,7 @@ Build and install to a connected device:
 ./gradlew :galib:installDebug
 ```
 
-The HonLib build path is set in `honlib/build.gradle.kts`; the manga path in
+The HonLib build path is set in `honlib/build.gradle.kts`; the GaLib path in
 `galib/build.gradle.kts`. Adjust if your sibling layout differs.
 
 ## Settings UI
