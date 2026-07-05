@@ -17,6 +17,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
+import android.widget.FrameLayout
 import android.view.WindowInsetsController
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
@@ -36,6 +37,8 @@ class MainActivity : Activity() {
         longPressFired = true
         @Suppress("DEPRECATION") onBackPressed()
     }
+    private var customView: View? = null
+    private var customViewCallback: WebChromeClient.CustomViewCallback? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -90,7 +93,38 @@ class MainActivity : Activity() {
             }
         }
         registerNetworkCallback()
-        webView.webChromeClient = WebChromeClient()
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onShowCustomView(view: View, callback: CustomViewCallback) {
+                // WebView routes HTML5 requestFullscreen() through here; a bare
+                // WebChromeClient would drop it, so the reader's fullscreen mode
+                // never engaged on Android.
+                if (customView != null) {
+                    callback.onCustomViewHidden()
+                    return
+                }
+                customView = view
+                customViewCallback = callback
+                (window.decorView as FrameLayout).addView(
+                    view,
+                    FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    ),
+                )
+                webView.visibility = View.GONE
+                hideSystemBars()
+            }
+
+            override fun onHideCustomView() {
+                val view = customView ?: return
+                (window.decorView as FrameLayout).removeView(view)
+                webView.visibility = View.VISIBLE
+                customView = null
+                customViewCallback?.onCustomViewHidden()
+                customViewCallback = null
+                hideSystemBars()
+            }
+        }
 
         if (savedInstanceState != null) {
             webView.restoreState(savedInstanceState)
