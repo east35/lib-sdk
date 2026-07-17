@@ -64,26 +64,72 @@ class EbookRouter(
     }
 
     private fun handleLibrary(): NanoHTTPD.Response {
-        val cloudJson: String? = try {
-            val req = Request.Builder().url("$cloudBaseUrl/api/library").get().build()
-            val resp = cloud.execute { req }
-            val body = resp.body?.string()
-            resp.close()
-            if (body != null && body.isNotEmpty()) {
-                libraryCacheFile.writeText(body)
-                body
-            } else null
-        } catch (_: Exception) { null }
+        val source = fetchCloudJson("/api/library", libraryCacheFile)
+            ?: cachedJson(libraryCacheFile)
+            ?: localLibraryJson()
+        return libraryResponse(source)
+    }
 
-        val source = cloudJson
-            ?: if (libraryCacheFile.exists()) libraryCacheFile.readText()
-               else localLibraryJson()
-        return NanoHTTPD.newFixedLengthResponse(
+    /**
+     * Both /api/library and /api/library/refresh return the SAME shape: the full
+     * { folder, books, groups } payload. The web UI feeds either response
+     * straight into setLibraryData(), so refresh MUST return a library — a bare
+     * status object like {"ok":true} makes the UI render an empty library
+     * ("No EPUBs found"). Keep this the single place that shapes the response.
+     */
+    private fun libraryResponse(source: String): NanoHTTPD.Response =
+        NanoHTTPD.newFixedLengthResponse(
             NanoHTTPD.Response.Status.OK,
             "application/json; charset=utf-8",
             annotateOffline(source),
         )
+
+    /**
+     * GET a JSON endpoint from cloud, caching the body only when the response
+     * is both successful and actually JSON. An error page (a tunnel's plain
+     * "404 page not found", a login redirect, an nginx 502 body) is a non-empty
+     * 200-adjacent body that will happily write to disk and then be served back
+     * as application/json forever, defeating the offline fallbacks below. A
+     * body we can't parse is not a response — treat it as no response at all.
+     */
+    private fun fetchCloudJson(path: String, cacheFile: File): String? = try {
+        val req = Request.Builder().url("$cloudBaseUrl$path").get().build()
+        val resp = cloud.execute { req }
+        val body = resp.body?.string()
+        val ok = resp.isSuccessful
+        val code = resp.code
+        resp.close()
+        when {
+            !ok -> { Log.w(TAG, "GET $path: cloud returned HTTP $code — not caching"); null }
+            body.isNullOrEmpty() -> null
+            !isJson(body) -> {
+                Log.w(TAG, "GET $path: cloud body is not JSON (${body.take(40)}) — not caching")
+                null
+            }
+            else -> { cacheFile.writeText(body); body }
+        }
+    } catch (e: Exception) {
+        Log.i(TAG, "GET $path failed (offline?): ${e.message}")
+        null
     }
+
+    /**
+     * Read a cache file, but only trust it if it still parses. Caches written
+     * by older builds (before fetchCloudJson validated) can hold error text;
+     * drop those instead of serving them until the end of time.
+     */
+    private fun cachedJson(cacheFile: File): String? {
+        if (!cacheFile.exists()) return null
+        val text = cacheFile.readText()
+        if (isJson(text)) return text
+        Log.w(TAG, "${cacheFile.name} holds non-JSON — discarding poisoned cache")
+        cacheFile.delete()
+        return null
+    }
+
+    private fun isJson(s: String): Boolean = try {
+        JSONObject(s); true
+    } catch (_: Exception) { false }
 
     /**
      * Synthesize a library response from the local index when the cloud is
@@ -163,21 +209,9 @@ class EbookRouter(
      * has the newer last_opened wins. last_opened is ISO 8601 → string compare works.
      */
     private fun handleProgressGet(): NanoHTTPD.Response {
-        val cloudJson: String? = try {
-            val req = Request.Builder().url("$cloudBaseUrl/api/progress").get().build()
-            val resp = cloud.execute { req }
-            val body = resp.body?.string()
-            resp.close()
-            if (body != null && body.isNotEmpty()) {
-                progressCacheFile.writeText(body)
-                body
-            } else null
-        } catch (_: Exception) { null }
-
-        val source = cloudJson ?: run {
-            if (progressCacheFile.exists()) progressCacheFile.readText()
-            else """{"books":{}}"""
-        }
+        val source = fetchCloudJson("/api/progress", progressCacheFile)
+            ?: cachedJson(progressCacheFile)
+            ?: """{"books":{}}"""
         return NanoHTTPD.newFixedLengthResponse(
             NanoHTTPD.Response.Status.OK,
             "application/json; charset=utf-8",
@@ -346,34 +380,42 @@ class EbookRouter(
 
     /**
      * Hooked into the existing "Refresh library" button. Flushes any dirty
-     * progress rows we couldn't push at write-time, then invalidates the local
-     * caches so the next /api/library and /api/progress are forced to refetch
-     * from cloud (assuming we're online; offline just returns the existing
-     * caches).
+     * progress rows we couldn't push at write-time, then returns a full library
+     * payload — the web UI feeds this response straight into setLibraryData(),
+     * exactly like /api/library, so it MUST carry { books, groups }. A status
+     * object here empties the library on screen.
+     *
+     * Online: the cloud's refresh returns a fresh payload; cache and return it.
+     * Offline: fall back to the last good cache, then the local index. Never
+     * blow away the cache on a failed refresh — that's how a transient outage
+     * turned into an empty library.
      */
     private fun handleLibraryRefresh(session: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
-        val flushed = flushDirty()
+        flushDirty()
         val body = readBody(session)
-        val out: String = try {
+        val cloudPayload: String? = try {
             val req = Request.Builder()
                 .url("$cloudBaseUrl/api/library/refresh")
                 .post(body.toRequestBody("application/json".toMediaType()))
                 .build()
             val resp = cloud.execute { req }
             val s = resp.body?.string().orEmpty()
+            val ok = resp.isSuccessful
             resp.close()
-            // Only invalidate caches on a real cloud success — otherwise we'd
-            // strand the user offline with no library to display.
-            libraryCacheFile.delete()
-            progressCacheFile.delete()
-            s.ifEmpty { """{"ok":true}""" }
+            when {
+                !ok -> { Log.w(TAG, "library/refresh: cloud HTTP ${resp.code} — using local library"); null }
+                s.isEmpty() || !isJson(s) -> {
+                    Log.w(TAG, "library/refresh: cloud body not JSON — using local library"); null
+                }
+                else -> { libraryCacheFile.writeText(s); s }
+            }
         } catch (e: Exception) {
             Log.i(TAG, "library/refresh cloud forward failed (offline?): ${e.message}")
-            """{"ok":true,"offline":true,"flushed":$flushed}"""
+            null
         }
-        return NanoHTTPD.newFixedLengthResponse(
-            NanoHTTPD.Response.Status.OK, "application/json", out,
-        )
+
+        val source = cloudPayload ?: cachedJson(libraryCacheFile) ?: localLibraryJson()
+        return libraryResponse(source)
     }
 
     /** Push every dirty queue row to cloud. Returns count successfully synced. */
