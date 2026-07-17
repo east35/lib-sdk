@@ -209,17 +209,32 @@ class EbookRouter(
      * has the newer last_opened wins. last_opened is ISO 8601 → string compare works.
      */
     private fun handleProgressGet(): NanoHTTPD.Response {
-        val source = fetchCloudJson("/api/progress", progressCacheFile)
-            ?: cachedJson(progressCacheFile)
-            ?: """{"books":{}}"""
+        // Distinguish a live cloud answer (authoritative — absence means the
+        // book was reset/deleted there) from a cached/empty fallback (offline —
+        // absence means we simply don't know). Only the former may drop rows.
+        val cloud = fetchCloudJson("/api/progress", progressCacheFile)
+        val source = cloud ?: cachedJson(progressCacheFile) ?: """{"books":{}}"""
         return NanoHTTPD.newFixedLengthResponse(
             NanoHTTPD.Response.Status.OK,
             "application/json; charset=utf-8",
-            mergeProgress(source),
+            mergeProgress(source, cloudAuthoritative = cloud != null),
         )
     }
 
-    private fun mergeProgress(cloudJson: String): String = try {
+    /**
+     * Merge cloud progress with the local write queue. The queue holds two kinds
+     * of rows: dirty (a local write cloud hasn't accepted yet) and clean
+     * (already synced, kept only to surface local progress between GETs).
+     *
+     * The subtle case is a book MISSING from the cloud response:
+     *   - dirty row      -> our write, cloud just hasn't seen it. Keep it.
+     *   - clean + live    -> cloud authoritatively dropped it (e.g. progress was
+     *                        reset on another client). Drop the stale local row,
+     *                        or it resurrects the book here forever.
+     *   - clean + offline -> cached/empty fallback; absence is not deletion.
+     *                        Keep showing last-known progress.
+     */
+    private fun mergeProgress(cloudJson: String, cloudAuthoritative: Boolean): String = try {
         val obj = JSONObject(cloudJson)
         val books = obj.optJSONObject("books") ?: JSONObject().also { obj.put("books", it) }
         for (row in queue.all()) {
@@ -230,11 +245,20 @@ class EbookRouter(
                 books.remove(row.key)
                 continue
             }
-            val localTs = local.optString("last_opened")
             val cloudEntry = books.optJSONObject(row.key)
-            val cloudTs = cloudEntry?.optString("last_opened").orEmpty()
-            if (cloudEntry == null || localTs > cloudTs) {
-                books.put(row.key, local)
+            if (cloudEntry == null) {
+                when {
+                    row.dirty -> books.put(row.key, local)          // pending local write
+                    cloudAuthoritative -> queue.delete(row.key)     // reset remotely → forget it
+                    else -> books.put(row.key, local)               // offline → last-known
+                }
+                continue
+            }
+            val localTs = local.optString("last_opened")
+            val cloudTs = cloudEntry.optString("last_opened")
+            when {
+                localTs > cloudTs -> books.put(row.key, local)      // local ahead → local wins
+                !row.dirty && cloudAuthoritative -> queue.delete(row.key) // cloud caught up → drop redundant row
             }
         }
         obj.toString()

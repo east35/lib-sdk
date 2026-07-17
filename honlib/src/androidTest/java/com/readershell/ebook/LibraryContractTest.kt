@@ -171,7 +171,55 @@ class LibraryContractTest {
         assertTrue("cloud book must be present", body.contains("Cloud Book"))
     }
 
+    // --- Progress sync: a reset on another client must propagate here ---
+
+    @Test
+    fun progress_resetOnCloud_dropsLocallySyncedProgress() {
+        // 1. Read a book: POST progress, cloud accepts (row becomes clean/synced).
+        cloud.enqueueAll(json("""{"ok":true}"""))
+        postBody("/api/progress", progressBody("testbook", "2026-07-17T10:00:00.000Z"))
+
+        // 2. Progress is reset on the web → cloud no longer lists the book.
+        cloud.enqueueAll(json("""{"books":{}}"""))
+
+        // 3. Device fetches progress. The book must NOT come back.
+        val body = get("/api/progress")
+        val books = JSONObject(body).getJSONObject("books")
+        assertTrue(
+            "a synced book absent from an authoritative cloud response must not resurrect",
+            !books.has("testbook"),
+        )
+    }
+
+    @Test
+    fun progress_offlineKeepsLastKnownProgress() {
+        // Read a book and sync it, then go offline.
+        cloud.enqueueAll(json("""{"ok":true}"""))
+        postBody("/api/progress", progressBody("testbook", "2026-07-17T10:00:00.000Z"))
+        cloud.shutdown()
+
+        // Offline, absence from cloud is NOT deletion — keep showing progress.
+        val body = get("/api/progress")
+        val books = JSONObject(body).getJSONObject("books")
+        assertTrue("offline reader must retain last-known progress", books.has("testbook"))
+    }
+
+    @Test
+    fun progress_unsyncedLocalWriteSurvivesEmptyCloud() {
+        // Cloud rejects the POST → row stays dirty (pending). It must still show
+        // up on GET even though the authoritative cloud response omits it.
+        cloud.enqueueAll(MockResponse().setResponseCode(500).setBody("boom"))
+        postBody("/api/progress", progressBody("pending", "2026-07-17T11:00:00.000Z"))
+        cloud.enqueueAll(json("""{"books":{}}"""))
+        val body = get("/api/progress")
+        val books = JSONObject(body).getJSONObject("books")
+        assertTrue("a dirty (unsynced) local write must not be dropped", books.has("pending"))
+    }
+
     // --- helpers ---
+
+    private fun progressBody(id: String, lastOpened: String) =
+        """{"book_id":"$id","cfi":"epubcfi(/6/2)","percent":0.5,"last_opened":"$lastOpened"}"""
 
     private fun assertLibraryShape(body: String) {
         val obj = JSONObject(body) // throws if not JSON — that IS the failure mode
@@ -195,10 +243,12 @@ class LibraryContractTest {
         http.newCall(Request.Builder().url(base(path)).get().build()).execute()
             .use { it.body!!.string() }
 
-    private fun post(path: String): String =
+    private fun post(path: String): String = postBody(path, "{}")
+
+    private fun postBody(path: String, body: String): String =
         http.newCall(
             Request.Builder().url(base(path))
-                .post("{}".toRequestBody("application/json".toMediaType())).build(),
+                .post(body.toRequestBody("application/json".toMediaType())).build(),
         ).execute().use { it.body!!.string() }
 
     private fun base(path: String) = "http://127.0.0.1:$port$path"
