@@ -23,7 +23,7 @@ android {
     buildTypes {
         getByName("debug") {
             isMinifyEnabled = false
-            buildConfigField("String", "DEFAULT_CLOUD_URL", "\"https://books.razerblade.dev\"")
+            buildConfigField("String", "DEFAULT_CLOUD_URL", "\"https://honlib.razerblade.dev\"")
         }
         getByName("release") {
             isMinifyEnabled = false
