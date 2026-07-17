@@ -46,8 +46,27 @@ class SetupActivity : AppCompatActivity() {
             localRootPath.text = "Couldn't resolve filesystem path for that folder"
             return@registerForActivityResult
         }
+        setPickedPath(path)
+    }
+
+    /**
+     * Record the chosen folder AND persist it immediately. This e-ink device
+     * recreates the setup Activity constantly (orientation/refresh relaunches),
+     * which wipes the transient pickedPath before the user can hit Save — so the
+     * pick would silently never stick. Writing to prefs here makes it survive
+     * recreation; onCreate restores it, and Save just re-confirms it.
+     */
+    private fun setPickedPath(path: String) {
         pickedPath = path
         localRootPath.text = path
+        (application as EbookApp).prefs.edit()
+            .putString(EbookApp.KEY_LOCAL_ROOT, path)
+            .apply()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(STATE_PICKED_PATH, pickedPath)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -64,7 +83,11 @@ class SetupActivity : AppCompatActivity() {
 
         cloudUrl.setText(app.prefs.getString(EbookApp.KEY_CLOUD_URL, "")?.ifEmpty { BuildConfig.DEFAULT_CLOUD_URL } ?: BuildConfig.DEFAULT_CLOUD_URL)
         password.setText(app.auth.password ?: "")
-        app.prefs.getString(EbookApp.KEY_LOCAL_ROOT, null)?.let {
+        // Restore a folder picked earlier — from a prior save, from the pick
+        // handler's immediate persist, or from an in-flight recreation's state.
+        val restored = savedInstanceState?.getString(STATE_PICKED_PATH)
+            ?: app.prefs.getString(EbookApp.KEY_LOCAL_ROOT, null)
+        restored?.let {
             pickedPath = it
             localRootPath.text = it
         }
@@ -159,5 +182,8 @@ class SetupActivity : AppCompatActivity() {
         }
     }
 
-    companion object { private const val TAG = "ReaderShellSetup" }
+    companion object {
+        private const val TAG = "ReaderShellSetup"
+        private const val STATE_PICKED_PATH = "picked_path"
+    }
 }
