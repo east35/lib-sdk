@@ -10,6 +10,7 @@ android {
     defaultConfig {
         minSdk = 26
         consumerProguardFiles("consumer-rules.pro")
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     compileOptions {
@@ -32,4 +33,8 @@ dependencies {
     // api/ — Request/Response appear in CloudClient's signature; app-modules build their own requests.
     api("com.squareup.okhttp3:okhttp:4.12.0")
     // org.json is ambient on Android; no dep needed.
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:core:1.6.1")
+    androidTestImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }

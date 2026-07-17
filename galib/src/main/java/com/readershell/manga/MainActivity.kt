@@ -73,6 +73,7 @@ class MainActivity : Activity() {
 
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
+        if (app.activatedWebBundleAtStartup) webView.clearCache(true)
 
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {

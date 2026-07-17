@@ -9,6 +9,7 @@ import java.security.MessageDigest
  *   book_id = sha256(library_relative_posix_path).hexdigest()[:16]
  */
 class EbookConfig(override val cloudBaseUrl: String) : AppConfig {
+    override val bundleAppId = "honlib"
     override val authPasswordKey = "EBOOK_LIB_PASSWORD"
     override val indexedExtensions = setOf("epub")
     override val proxyPort = 38765

@@ -5,6 +5,9 @@ package com.readershell.core
  * an implementation; core/ stays app-agnostic.
  */
 interface AppConfig {
+    /** Stable identity used by the backend app-bundle manifest. */
+    val bundleAppId: String
+
     /** Cloud base URL, e.g. "https://ebook.example.com". No trailing slash. */
     val cloudBaseUrl: String
 
@@ -20,3 +23,6 @@ interface AppConfig {
     /** Localhost port for the embedded server. */
     val proxyPort: Int
 }
+
+/** Version of the native/web contract implemented by this shell. */
+const val SHELL_API_VERSION = 1

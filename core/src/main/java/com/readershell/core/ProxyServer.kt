@@ -9,6 +9,8 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.ByteArrayInputStream
 import java.io.IOException
+import java.io.File
+import java.io.FileInputStream
 
 /**
  * The embedded localhost HTTP server. Bound to 127.0.0.1 only.
@@ -23,6 +25,8 @@ class ProxyServer(
     private val cloud: CloudClient,
     private val assets: AssetManager,
     private val router: Router,
+    /** Fixed for this server's lifetime; null means the APK assets/web tree. */
+    private val webRoot: File? = null,
 ) : NanoHTTPD("127.0.0.1", config.proxyPort) {
 
     interface Router {
@@ -51,13 +55,22 @@ class ProxyServer(
 
 
     private fun serveAsset(uri: String): Response? {
-        val path = when {
-            uri == "/" -> "web/index.html"
-            uri.startsWith("/") -> "web${uri}"
-            else -> "web/$uri"
-        }
+        val relative = when {
+            uri == "/" -> "index.html"
+            uri.startsWith("/") -> uri.drop(1)
+            else -> uri
+        }.substringBefore('?')
+        val path = "web/$relative"
         val (data, mime) = try {
-            assets.open(path).use { it.readBytes() } to mimeFor(path)
+            if (webRoot == null) {
+                assets.open(path).use { it.readBytes() } to mimeFor(path)
+            } else {
+                val root = webRoot.canonicalFile
+                val file = File(root, relative).canonicalFile
+                if (file.path != root.path && !file.path.startsWith(root.path + File.separator)) return null
+                if (!file.isFile) return null
+                FileInputStream(file).use { it.readBytes() } to mimeFor(file.name)
+            }
         } catch (_: IOException) {
             return null
         }

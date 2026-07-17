@@ -5,6 +5,7 @@ import java.net.URLDecoder
 import java.net.URLEncoder
 
 class MangaConfig(override val cloudBaseUrl: String) : AppConfig {
+    override val bundleAppId = "galib"
     override val authPasswordKey = "MANGA_DL_PASSWORD"
     override val indexedExtensions = setOf("cbz")
     override val proxyPort = 38766

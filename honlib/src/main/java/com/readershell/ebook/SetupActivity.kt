@@ -80,6 +80,19 @@ class SetupActivity : AppCompatActivity() {
         status = findViewById(R.id.status)
         grantFileAccess = findViewById(R.id.grant_file_access)
         grantFileAccess.setOnClickListener { openAllFilesAccessSettings() }
+        refreshBundleStatus(app)
+        findViewById<Button>(R.id.reset_web_bundle).apply {
+            isEnabled = app.webBundles != null
+            setOnClickListener {
+                app.resetWebBundle()
+                refreshBundleStatus(app)
+                status.text = "Using bundled web app. Reloading…"
+                startActivity(Intent(this@SetupActivity, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+                finish()
+            }
+        }
 
         cloudUrl.setText(app.prefs.getString(EbookApp.KEY_CLOUD_URL, "")?.ifEmpty { BuildConfig.DEFAULT_CLOUD_URL } ?: BuildConfig.DEFAULT_CLOUD_URL)
         password.setText(app.auth.password ?: "")
@@ -137,11 +150,22 @@ class SetupActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refreshFileAccessUi()
+        refreshBundleStatus(application as EbookApp)
     }
 
     private fun refreshFileAccessUi() {
         val granted = hasAllFilesAccess()
         grantFileAccess.visibility = if (granted) View.GONE else View.VISIBLE
+    }
+
+    private fun refreshBundleStatus(app: EbookApp) {
+        val state = app.webBundles?.state()
+        val text = if (state == null) "Web app: Bundled APK\nUpdate: configure the app to enable checks" else buildString {
+            append("Web app: ${state.activeLabel}")
+            state.pendingVersion?.let { append("\nPending: ${it.take(12)} (next launch)") }
+            append("\nUpdate: ${state.lastResult}")
+        }
+        findViewById<TextView>(R.id.web_bundle_status).text = text
     }
 
     private fun hasAllFilesAccess(): Boolean =
