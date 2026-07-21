@@ -12,6 +12,7 @@ class EbookConfig(override val cloudBaseUrl: String) : AppConfig {
     override val authPasswordKey = "EBOOK_LIB_PASSWORD"
     override val indexedExtensions = setOf("epub")
     override val proxyPort = 38765
+    override val appBundleId = "honlib"  // matches HonLib web_bundle.py APP_ID
 
     override fun contentIdFor(relativePosixPath: String): String {
         val md = MessageDigest.getInstance("SHA-256")
