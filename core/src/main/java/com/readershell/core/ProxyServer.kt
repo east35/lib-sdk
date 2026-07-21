@@ -8,14 +8,17 @@ import okhttp3.Request
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.ByteArrayInputStream
+import java.io.File
+import java.io.FileInputStream
 import java.io.IOException
 
 /**
  * The embedded localhost HTTP server. Bound to 127.0.0.1 only.
  *
  * Routing is delegated to a per-app [Router] so core/ stays content-agnostic.
- * Default behavior for unknown paths: serve from bundled assets (the web UI),
- * falling back to cloud passthrough.
+ * Default behavior for unknown paths: serve the web UI, then fall back to cloud
+ * passthrough. The web UI is served from the OTA-active bundle when [webRoot]
+ * yields one, otherwise from the APK-baked assets.
  */
 class ProxyServer(
     private val ctx: Context,
@@ -23,6 +26,8 @@ class ProxyServer(
     private val cloud: CloudClient,
     private val assets: AssetManager,
     private val router: Router,
+    /** Active OTA bundle directory, or null to serve APK-baked assets. */
+    private val webRoot: () -> File? = { null },
 ) : NanoHTTPD("127.0.0.1", config.proxyPort) {
 
     interface Router {
@@ -51,11 +56,16 @@ class ProxyServer(
 
 
     private fun serveAsset(uri: String): Response? {
-        val path = when {
-            uri == "/" -> "web/index.html"
-            uri.startsWith("/") -> "web${uri}"
-            else -> "web/$uri"
+        val rel = when {
+            uri == "/" -> "index.html"
+            uri.startsWith("/") -> uri.removePrefix("/")
+            else -> uri
         }
+        // Prefer the OTA-active bundle; fall through per-file to APK assets so a
+        // bundle that omits a path (e.g. fonts baked only into the APK) still resolves.
+        serveFromBundle(rel)?.let { return it }
+
+        val path = "web/$rel"
         val (data, mime) = try {
             assets.open(path).use { it.readBytes() } to mimeFor(path)
         } catch (_: IOException) {
@@ -63,6 +73,19 @@ class ProxyServer(
         }
         return newFixedLengthResponse(
             Response.Status.OK, mime, ByteArrayInputStream(data), data.size.toLong(),
+        )
+    }
+
+    private fun serveFromBundle(rel: String): Response? {
+        val root = webRoot() ?: return null
+        val file = File(root, rel)
+        if (!file.isFile) return null
+        // Defense in depth against a "../" sneaking through the router/URI.
+        if (file.canonicalPath != root.canonicalFile.path &&
+            !file.canonicalPath.startsWith(root.canonicalFile.path + File.separator)
+        ) return null
+        return newFixedLengthResponse(
+            Response.Status.OK, mimeFor(rel), FileInputStream(file), file.length(),
         )
     }
 

@@ -19,4 +19,13 @@ interface AppConfig {
 
     /** Localhost port for the embedded server. */
     val proxyPort: Int
+
+    /**
+     * App id for the OTA web-bundle updater, matching the backend's APP_ID
+     * (e.g. "honlib"). When non-null the shell pulls versioned web bundles from
+     * the backend's app-bundle endpoints and serves the active one in preference
+     * to the APK-baked assets. null (the default) disables OTA — the app serves only
+     * its bundled web UI, exactly as before.
+     */
+    val appBundleId: String? get() = null
 }
