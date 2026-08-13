@@ -23,6 +23,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Toast
 
 /**
  * WebView shell. Loads the bundled UI via the embedded localhost proxy so the
@@ -33,6 +34,7 @@ import android.webkit.WebViewClient
 class MainActivity : Activity() {
 
     private lateinit var webView: WebView
+    private var applyingWebUpdate = false
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -83,6 +85,7 @@ class MainActivity : Activity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 view?.evaluateJavascript(OFFLINE_AWARE_REFRESH_JS, null)
                 view?.evaluateJavascript(SHELL_SETTINGS_BUTTON_JS, null)
+                view?.evaluateJavascript(APPLY_UPDATE_BRIDGE_JS, null)
                 pushOnlineState(isOnline())
             }
         }
@@ -98,6 +101,10 @@ class MainActivity : Activity() {
     }
 
     private fun handleExternalNavigation(uri: Uri): Boolean {
+        if (uri.scheme == "shell" && uri.host == "apply-update") {
+            applyWebUpdate()
+            return true
+        }
         if (uri.scheme == "shell" && uri.host == "settings") {
             startActivity(Intent(this, SetupActivity::class.java))
             return true
@@ -107,6 +114,28 @@ class MainActivity : Activity() {
         if (local) return false
         startActivity(Intent(Intent.ACTION_VIEW, uri))
         return true
+    }
+
+    private fun applyWebUpdate() {
+        if (applyingWebUpdate) return
+        applyingWebUpdate = true
+        val app = application as EbookApp
+        app.applyLatestWebBundle { applied ->
+            applyingWebUpdate = false
+            if (isFinishing || isDestroyed) return@applyLatestWebBundle
+            if (!applied) {
+                webView.evaluateJavascript(
+                    "window.dispatchEvent(new Event('hon-reader-update-failed'));", null,
+                )
+                Toast.makeText(this, "Update could not be applied. Check your connection and try again.", Toast.LENGTH_LONG).show()
+                return@applyLatestWebBundle
+            }
+            webView.stopLoading()
+            webView.clearCache(true)
+            webView.clearHistory()
+            val port = app.config!!.proxyPort
+            webView.loadUrl("http://127.0.0.1:$port/?updated=${System.currentTimeMillis()}")
+        }
     }
 
     private fun hideSystemBars() {
@@ -281,6 +310,16 @@ class MainActivity : Activity() {
               ensure();
               var mo = new MutationObserver(ensure);
               mo.observe(document.documentElement, { childList: true, subtree: true });
+            })();
+        """
+
+        /** Advertise deterministic update activation to compatible web UI. */
+        private const val APPLY_UPDATE_BRIDGE_JS = """
+            (function() {
+              window.__readerShellApplyUpdate = function() {
+                window.location.href = 'shell://apply-update';
+              };
+              window.dispatchEvent(new Event('hon-reader-shell-ready'));
             })();
         """
     }

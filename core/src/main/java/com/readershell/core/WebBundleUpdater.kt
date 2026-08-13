@@ -20,10 +20,12 @@ import java.util.zip.ZipInputStream
  * and the on-disk directory name. A downloaded bundle is verified, extracted to
  * `files/web-bundles/<appId>/versions/<version>/`, and staged as `pending`.
  *
- * Promotion pending -> active happens ONLY at cold start via [activatePending],
- * so a live session never has the UI swapped underneath it. [activeRoot] is what
- * the proxy serves from; a null return means "fall back to the APK-baked assets"
- * (first run, or OTA disabled).
+ * Promotion pending -> active normally happens at cold start via
+ * [activatePending]. An explicit user action can call [activateLatest] and then
+ * rebuild the proxy/WebView, so activation is deterministic without swapping
+ * files underneath a live page. [activeRoot] is what the proxy serves from; a
+ * null return means "fall back to the APK-baked assets" (first run, or OTA
+ * disabled).
  *
  * State lives in `shared_prefs/web_bundle_<appId>.xml` (active / pending /
  * last_result), matching the shipped shell so an in-place source swap is
@@ -55,17 +57,40 @@ class WebBundleUpdater(
      * whose directory is missing or corrupt is discarded rather than activated,
      * so the previous active keeps serving.
      */
-    fun activatePending() {
-        val pending = prefs.getString(KEY_PENDING, null) ?: return
+    @Synchronized
+    fun activatePending(): Boolean {
+        val pending = prefs.getString(KEY_PENDING, null) ?: return false
+        val previousActive = prefs.getString(KEY_ACTIVE, null)
         val dir = versionDir(pending)
         if (File(dir, "index.html").isFile) {
-            prefs.edit().putString(KEY_ACTIVE, pending).remove(KEY_PENDING).apply()
-            pruneOldVersions(keep = pending)
+            if (!prefs.edit().putString(KEY_ACTIVE, pending).remove(KEY_PENDING).commit()) {
+                setResult("Could not activate ${short(pending)}")
+                return false
+            }
+            // A running proxy may still be pinned to the previous root until
+            // its owner rebuilds it. Retain that root through this activation;
+            // it will be removed by a later activation.
+            pruneOldVersions(pending, previousActive)
+            setResult("Activated ${short(pending)}")
             Log.i(TAG, "activated bundle ${short(pending)}")
+            return true
         } else {
-            prefs.edit().remove(KEY_PENDING).apply()
+            prefs.edit().remove(KEY_PENDING).commit()
             Log.w(TAG, "pending bundle ${short(pending)} missing/corrupt — discarded")
+            return false
         }
+    }
+
+    /**
+     * Activate an already-staged bundle, or download and activate the latest
+     * bundle when none is staged. The caller must rebuild the proxy and WebView
+     * after a true result; no live page is changed by this method itself.
+     */
+    @Synchronized
+    fun activateLatest(): Boolean {
+        if (activatePending()) return true
+        checkForUpdate()
+        return activatePending()
     }
 
     /**
@@ -73,6 +98,7 @@ class WebBundleUpdater(
      * newer than what's active/pending. Network + disk work — call off the main
      * thread. Never throws.
      */
+    @Synchronized
     fun checkForUpdate() {
         try {
             val manifest = fetchManifest() ?: return
@@ -165,10 +191,11 @@ class WebBundleUpdater(
     }
 
     /** Drop every extracted version except the ones still referenced. */
-    private fun pruneOldVersions(keep: String) {
+    private fun pruneOldVersions(vararg keep: String?) {
+        val retained = keep.filterNotNull().toSet()
         val pending = prefs.getString(KEY_PENDING, null)
         versionsDir.listFiles()?.forEach { f ->
-            if (f.isDirectory && f.name != keep && f.name != pending) f.deleteRecursively()
+            if (f.isDirectory && f.name !in retained && f.name != pending) f.deleteRecursively()
         }
     }
 
