@@ -34,10 +34,10 @@ import java.util.zip.ZipOutputStream
  *
  * The updater re-implements, in Kotlin, the client half of HonLib's app-bundle
  * protocol (web_bundle.py): fetch a manifest, download the content-addressed
- * ZIP, verify sha256 == bundleVersion, stage it, and promote it to active only
- * at cold start. This test pins that behaviour — and the two ways a bundle must
- * be REJECTED (bad checksum, shell too old) — against a mock backend so a
- * protocol drift on either side fails here instead of on the device.
+ * ZIP, verify sha256 == bundleVersion, stage it, and promote it at cold start or
+ * after an explicit user apply action. This test pins that behaviour — and the
+ * two ways a bundle must be REJECTED (bad checksum, shell too old) — against a
+ * mock backend so a protocol drift fails here instead of on the device.
  */
 @RunWith(AndroidJUnit4::class)
 class WebBundleUpdaterTest {
@@ -92,6 +92,33 @@ class WebBundleUpdaterTest {
     }
 
     @Test
+    fun activateLatest_downloadsAndActivatesWithoutProcessRestart() {
+        val zip = buildZip("index.html" to "<html>apply-now</html>")
+        val version = sha256(zip)
+        serve(manifest(version), version to zip)
+
+        assertTrue("explicit apply should download and activate", updater.activateLatest())
+        assertEquals(
+            "<html>apply-now</html>",
+            File(updater.activeRoot(), "index.html").readText(),
+        )
+        assertEquals("Activated ${version.take(12)}", lastResult())
+    }
+
+    @Test
+    fun activateLatest_usesStagedBundleWithoutAnotherNetworkRequest() {
+        val zip = buildZip("index.html" to "<html>already staged</html>")
+        val version = sha256(zip)
+        serve(manifest(version), version to zip)
+        updater.checkForUpdate()
+        val requestsAfterStaging = cloud.requestCount
+
+        assertTrue("explicit apply should activate the staged bundle", updater.activateLatest())
+        assertEquals(requestsAfterStaging, cloud.requestCount)
+        assertEquals("<html>already staged</html>", File(updater.activeRoot(), "index.html").readText())
+    }
+
+    @Test
     fun proxy_servesActiveBundle_overApkAssets() {
         val zip = buildZip("index.html" to "OTA-INDEX", "app.js" to "OTA-APPJS")
         val version = sha256(zip)
@@ -121,6 +148,44 @@ class WebBundleUpdaterTest {
             assertEquals("OTA-APPJS", httpGet(port, "/app.js"))
         } finally {
             proxy.stop()
+        }
+    }
+
+    @Test
+    fun explicitActivation_doesNotChangeRunningProxysPinnedBundle() {
+        val oldZip = buildZip("index.html" to "OLD-BUNDLE")
+        val oldVersion = sha256(oldZip)
+        serve(manifest(oldVersion), oldVersion to oldZip)
+        assertTrue(updater.activateLatest())
+
+        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+        val pinnedRoot = updater.activeRoot()
+        val oldPort = freePort()
+        val oldProxy = testProxy(oldPort) { pinnedRoot }.also { it.start() }
+
+        try {
+            assertEquals("OLD-BUNDLE", httpGet(oldPort, "/"))
+
+            val newZip = buildZip("index.html" to "NEW-BUNDLE")
+            val newVersion = sha256(newZip)
+            serve(manifest(newVersion), newVersion to newZip)
+            assertTrue(updater.activateLatest())
+
+            assertEquals(
+                "the live proxy must remain wholly on its original bundle",
+                "OLD-BUNDLE",
+                httpGet(oldPort, "/"),
+            )
+
+            val newPort = freePort()
+            val rebuiltProxy = testProxy(newPort) { updater.activeRoot() }.also { it.start() }
+            try {
+                assertEquals("NEW-BUNDLE", httpGet(newPort, "/"))
+            } finally {
+                rebuiltProxy.stop()
+            }
+        } finally {
+            oldProxy.stop()
         }
     }
 
@@ -217,6 +282,24 @@ class WebBundleUpdaterTest {
         ctx.getSharedPreferences(prefsName, android.content.Context.MODE_PRIVATE)
             .edit().clear().apply()
         bundlesDir.deleteRecursively()
+    }
+
+    private fun testProxy(port: Int, webRoot: () -> File?): ProxyServer {
+        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+        val cfg = object : AppConfig {
+            override val cloudBaseUrl = cloud.url("/").toString().trimEnd('/')
+            override val authPasswordKey = "x"
+            override val indexedExtensions = setOf("epub")
+            override val proxyPort = port
+            override fun contentIdFor(relativePosixPath: String) = relativePosixPath
+        }
+        return ProxyServer(
+            ctx, cfg, cloudClient, ctx.assets,
+            router = object : ProxyServer.Router {
+                override fun route(session: fi.iki.elonen.NanoHTTPD.IHTTPSession) = null
+            },
+            webRoot = webRoot,
+        )
     }
 
     private fun httpGet(port: Int, path: String): String =

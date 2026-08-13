@@ -19,6 +19,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Owns the long-lived shell components: config, auth, local index, progress
@@ -75,7 +76,7 @@ class EbookApp : Application() {
                         if (n > 0) Log.i(TAG, "auto-flushed $n dirty progress row(s) on connectivity")
                     }
                     // Regaining connectivity is a natural moment to pull a newer
-                    // web bundle; it stages for the next cold start, never mid-session.
+                    // web bundle. It remains staged until launch or explicit apply.
                     updater?.checkForUpdate()
                 }
             }
@@ -92,9 +93,9 @@ class EbookApp : Application() {
     /**
      * Build/rebuild the proxy stack from current prefs. Stops any running proxy
      * first. [coldStart] is true only for the app-launch build: it promotes a
-     * bundle staged last session (activation is cold-start-only, so a live
-     * session never has its UI swapped) and kicks off an update check. A warm
-     * rebuild (e.g. after Setup saves) keeps serving the current active bundle.
+     * bundle staged last session and kicks off an update check. A warm rebuild
+     * (e.g. after Setup saves or explicit update activation) serves the current
+     * active bundle.
      */
     fun reload(coldStart: Boolean = false) {
         proxy?.stop()
@@ -109,7 +110,11 @@ class EbookApp : Application() {
             prefs.getString(KEY_LOCAL_ROOT, null)?.takeIf { it.isNotEmpty() }?.let { setRoot(it) }
         }
         val r = EbookRouter(this, c, idx, queue, cfg.cloudBaseUrl)
-        val p = ProxyServer(this, cfg, c, assets, r, webRoot = { upd?.activeRoot() }).also { it.start() }
+        // Pin this proxy to one immutable bundle root. If an explicit update is
+        // activated while it is running, no request can mix old and new assets;
+        // reload() creates the next proxy with the newly active root.
+        val activeWebRoot = upd?.activeRoot()
+        val p = ProxyServer(this, cfg, c, assets, r, webRoot = { activeWebRoot }).also { it.start() }
 
         config = cfg
         cloud = c
@@ -120,6 +125,23 @@ class EbookApp : Application() {
 
         if (coldStart && upd != null) ioScope.launch {
             if (Reachability.isOnline(this@EbookApp)) upd.checkForUpdate()
+        }
+    }
+
+    /** Download if needed, activate, and rebuild the proxy before reloading UI. */
+    fun applyLatestWebBundle(onComplete: (Boolean) -> Unit) {
+        val current = updater
+        if (current == null) {
+            onComplete(false)
+            return
+        }
+        ioScope.launch {
+            val applied = runCatching {
+                if (!current.activateLatest()) false
+                else { reload(); true }
+            }.onFailure { Log.w(TAG, "could not apply web bundle", it) }
+                .getOrDefault(false)
+            withContext(Dispatchers.Main) { onComplete(applied) }
         }
     }
 
