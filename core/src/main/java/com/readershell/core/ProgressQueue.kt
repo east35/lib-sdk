@@ -61,6 +61,26 @@ class ProgressQueue(ctx: Context, namespace: String) :
 
     fun dirtyRows(): List<KeyedRow> = all().filter { it.dirty }
 
+    /**
+     * Rows whose `updated` is greater than [after], lowest first. For stores
+     * that use `updated` as a change counter and want only what is new.
+     */
+    fun since(after: Double): List<KeyedRow> = readableDatabase.rawQuery(
+        "SELECT key, payload, updated, dirty FROM progress WHERE updated > ? ORDER BY updated",
+        arrayOf(after.toString()),
+    ).use { c ->
+        buildList {
+            while (c.moveToNext()) add(
+                KeyedRow(c.getString(0), c.getString(1), c.getDouble(2), c.getInt(3) != 0)
+            )
+        }
+    }
+
+    /** The largest `updated` in the table, or 0 when it is empty. */
+    fun maxUpdated(): Double = readableDatabase.rawQuery(
+        "SELECT MAX(updated) FROM progress", null,
+    ).use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getDouble(0) else 0.0 }
+
     fun markClean(key: String) {
         writableDatabase.execSQL("UPDATE progress SET dirty = 0 WHERE key = ?", arrayOf(key))
     }

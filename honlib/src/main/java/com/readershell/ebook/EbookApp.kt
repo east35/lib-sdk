@@ -31,6 +31,8 @@ class EbookApp : Application() {
     lateinit var prefs: SharedPreferences
     lateinit var auth: Auth
     lateinit var queue: ProgressQueue
+    /** Local copy of journals and passages, and their unsent changes. */
+    lateinit var journalStore: ProgressQueue
 
     var config: EbookConfig? = null
         private set
@@ -52,6 +54,7 @@ class EbookApp : Application() {
         prefs = getSharedPreferences("ebook_shell", Context.MODE_PRIVATE)
         auth = Auth(this, namespace = "ebook")
         queue = ProgressQueue(this, namespace = "ebook")
+        journalStore = ProgressQueue(this, namespace = "ebook_journal")
         // coldStart: promote any bundle downloaded last session before we serve.
         if (isConfigured()) reload(coldStart = true)
         registerConnectivityFlush()
@@ -59,8 +62,8 @@ class EbookApp : Application() {
 
     /**
      * Watch network state. Each time the device gains a validated internet
-     * connection, try to push any dirty progress rows to cloud. Cheap if
-     * nothing's dirty.
+     * connection, try to push any dirty progress rows and unsent journal
+     * changes to cloud. Cheap if nothing's dirty.
      */
     private fun registerConnectivityFlush() {
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -73,7 +76,7 @@ class EbookApp : Application() {
                 ioScope.launch {
                     router?.let { r ->
                         val n = r.flushDirty()
-                        if (n > 0) Log.i(TAG, "auto-flushed $n dirty progress row(s) on connectivity")
+                        if (n > 0) Log.i(TAG, "auto-flushed $n dirty row(s) on connectivity")
                     }
                     // Regaining connectivity is a natural moment to pull a newer
                     // web bundle. It remains staged until launch or explicit apply.
@@ -109,7 +112,7 @@ class EbookApp : Application() {
         val idx = LocalIndex(cfg).apply {
             prefs.getString(KEY_LOCAL_ROOT, null)?.takeIf { it.isNotEmpty() }?.let { setRoot(it) }
         }
-        val r = EbookRouter(this, c, idx, queue, cfg.cloudBaseUrl)
+        val r = EbookRouter(this, c, idx, queue, cfg.cloudBaseUrl, journalStore)
         // Pin this proxy to one immutable bundle root. If an explicit update is
         // activated while it is running, no request can mix old and new assets;
         // reload() creates the next proxy with the newly active root.
