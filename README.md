@@ -39,6 +39,25 @@ The HonLib build path is set in `honlib/build.gradle.kts`; the GaLib path in
 `galib/build.gradle.kts`. Adjust if your sibling layout differs. HonLib is also
 found when this repo is checked out as its `android/` submodule.
 
+### Release builds
+
+A release is signed with a key kept outside the repo and passed in as Gradle
+properties. Environment variables keep the password out of the process list:
+
+```sh
+ORG_GRADLE_PROJECT_honlibStoreFile=/path/to/honlib-release.jks \
+ORG_GRADLE_PROJECT_honlibStorePassword="$(cat /path/to/honlib-release.pass)" \
+ORG_GRADLE_PROJECT_honlibKeyPassword="$(cat /path/to/honlib-release.pass)" \
+ORG_GRADLE_PROJECT_honlibCloudUrl=https://your.honlib.server \
+./gradlew :honlib:assembleRelease
+```
+
+The key alias defaults to `honlib` (`honlibKeyAlias` overrides it). Without
+`honlibStoreFile` the release APK is left unsigned. Android only installs an
+update signed with the same key as the app it replaces, so keep the key and
+its password backed up. Bump `versionCode` and `versionName` in
+`honlib/build.gradle.kts` for each release.
+
 ### Test builds beside an installed app
 
 A locally signed build cannot update an app that was signed elsewhere, and

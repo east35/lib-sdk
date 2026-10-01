@@ -22,8 +22,8 @@ android {
         applicationId = "com.readershell.ebook"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 4
+        versionName = "0.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         idSuffix?.let { applicationIdSuffix = it }
         // Its own proxy port too, so both apps can be running at once.
@@ -37,6 +37,27 @@ android {
         buildConfig = true
     }
 
+    // Release signing is supplied from outside the repo so no key material or
+    // password is ever committed. Absent those properties the release build is
+    // left unsigned, rather than silently falling back to the debug key.
+    val releaseStore = (findProperty("honlibStoreFile") as String?)?.let { file(it) }
+    signingConfigs {
+        if (releaseStore != null) {
+            create("release") {
+                storeFile = releaseStore
+                storePassword = findProperty("honlibStorePassword") as String?
+                keyAlias = findProperty("honlibKeyAlias") as String? ?: "honlib"
+                keyPassword = findProperty("honlibKeyPassword") as String?
+                enableV1Signing = true
+                enableV2Signing = true
+            }
+        }
+    }
+
+    // Only pre-fills the server field on the setup screen; a device pointed at
+    // a different library just edits it once.
+    val releaseCloudUrl = (findProperty("honlibCloudUrl") as String?) ?: ""
+
     buildTypes {
         getByName("debug") {
             isMinifyEnabled = false
@@ -44,7 +65,10 @@ android {
         }
         getByName("release") {
             isMinifyEnabled = false
-            buildConfigField("String", "DEFAULT_CLOUD_URL", "\"\"")
+            buildConfigField("String", "DEFAULT_CLOUD_URL", "\"$releaseCloudUrl\"")
+            if (releaseStore != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
