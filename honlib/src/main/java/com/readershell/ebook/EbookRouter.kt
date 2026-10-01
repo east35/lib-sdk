@@ -17,7 +17,8 @@ import java.io.FileInputStream
 /**
  * Per-spec §5 ebook routing. Endpoint shapes confirmed against
  * HonLib app.py (https://github.com/east35/HonLib):
- *   /api/library, /api/book/<id>/file, /api/book/<id>/cover, /api/progress
+ *   /api/library, /api/book/<id>/file, /api/book/<id>/cover, /api/progress,
+ *   /api/journal/sync, /api/journal/<kind>/<id>
  *
  * Phase-1 stub: handles local hits for /file and /cover (when reachable),
  * annotates /api/library with offline:true for ids present locally, and
@@ -31,7 +32,11 @@ class EbookRouter(
     private val index: LocalIndex,
     private val queue: ProgressQueue,
     private val cloudBaseUrl: String,
+    journalStore: ProgressQueue = ProgressQueue(ctx, "ebook_journal"),
 ) : com.readershell.core.ProxyServer.Router {
+
+    /** Local copy of journals and passages; see [JournalMirror]. */
+    private val journal = JournalMirror(ctx, cloud, journalStore, cloudBaseUrl)
 
     private val libraryCacheFile: File by lazy { File(ctx.filesDir, "library_cache.json") }
     private val progressCacheFile: File by lazy { File(ctx.filesDir, "progress_cache.json") }
@@ -39,7 +44,10 @@ class EbookRouter(
         File(ctx.filesDir, "cover_cache").apply { mkdirs() }
     }
 
-    companion object { private const val TAG = "ReaderShellRouter" }
+    companion object {
+        private const val TAG = "ReaderShellRouter"
+        private val JOURNAL_DOC = Regex("^/api/journal/(journals|passages)/([A-Za-z0-9][A-Za-z0-9-]{7,63})$")
+    }
 
     override fun route(session: NanoHTTPD.IHTTPSession): NanoHTTPD.Response? {
         val uri = session.uri
@@ -59,6 +67,12 @@ class EbookRouter(
                 handleProgressReset(session)
             uri == "/api/library/refresh" && session.method == NanoHTTPD.Method.POST ->
                 handleLibraryRefresh(session)
+            uri == "/api/journal/sync" && session.method == NanoHTTPD.Method.GET ->
+                handleJournalSync(session)
+            session.method == NanoHTTPD.Method.POST && JOURNAL_DOC.matches(uri) ->
+                handleJournalPut(session, uri)
+            // Journal export and search are not mirrored: they fall through to
+            // cloud and need a connection.
             else -> null
         }
     }
@@ -366,6 +380,43 @@ class EbookRouter(
     }
 
     /**
+     * Journals and passages are answered from the local copy, which is brought
+     * up to date with cloud first whenever cloud can be reached. The web UI
+     * polls this while a journal is open, so it must answer promptly offline.
+     */
+    private fun handleJournalSync(session: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
+        val since = session.queryParameterString
+            ?.split('&')
+            ?.firstOrNull { it.startsWith("since=") }
+            ?.removePrefix("since=")
+            ?.let { java.net.URLDecoder.decode(it, "UTF-8") }
+        return NanoHTTPD.newFixedLengthResponse(
+            NanoHTTPD.Response.Status.OK,
+            "application/json; charset=utf-8",
+            journal.sync(since).toString(),
+        )
+    }
+
+    /**
+     * A highlight, note, tag or journal change. Written to the local copy
+     * first, so it is safe whatever the network does, then offered to cloud.
+     */
+    private fun handleJournalPut(session: NanoHTTPD.IHTTPSession, uri: String): NanoHTTPD.Response {
+        val (kind, id) = JOURNAL_DOC.matchEntire(uri)!!.destructured
+        val result = journal.put(kind, id, readBody(session))
+            ?: return NanoHTTPD.newFixedLengthResponse(
+                NanoHTTPD.Response.Status.BAD_REQUEST,
+                "application/json",
+                """{"ok":false,"error":"invalid document"}""",
+            )
+        return NanoHTTPD.newFixedLengthResponse(
+            NanoHTTPD.Response.Status.OK,
+            "application/json; charset=utf-8",
+            result.toString(),
+        )
+    }
+
+    /**
      * Forward reset to cloud AND drop the local queue row, so our merge
      * doesn't resurrect the cleared progress on the next GET.
      */
@@ -442,9 +493,12 @@ class EbookRouter(
         return libraryResponse(source)
     }
 
-    /** Push every dirty queue row to cloud. Returns count successfully synced. */
+    /**
+     * Push every dirty queue row to cloud, progress and journal alike. Returns
+     * count successfully synced.
+     */
     fun flushDirty(): Int {
-        var n = 0
+        var n = journal.flushDirty()
         for (row in queue.dirtyRows()) {
             val isReset = try { JSONObject(row.payload).optBoolean("_reset") } catch (_: Exception) { false }
             val url = if (isReset) "$cloudBaseUrl/api/progress/reset"

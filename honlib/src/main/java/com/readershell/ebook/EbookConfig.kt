@@ -11,7 +11,7 @@ import java.security.MessageDigest
 class EbookConfig(override val cloudBaseUrl: String) : AppConfig {
     override val authPasswordKey = "EBOOK_LIB_PASSWORD"
     override val indexedExtensions = setOf("epub")
-    override val proxyPort = 38765
+    override val proxyPort = BuildConfig.PROXY_PORT
     override val appBundleId = "honlib"  // matches HonLib web_bundle.py APP_ID
 
     override fun contentIdFor(relativePosixPath: String): String {
